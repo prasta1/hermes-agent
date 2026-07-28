@@ -1,10 +1,18 @@
+/** First occurrence of each id, in order (Set preserves insertion order). */
+const dedupeIds = (ids: string[]): string[] => [...new Set(ids)]
+
 /** New ids first, then ids still present in the persisted order. */
 export function reconcileFreshFirst(currentIds: string[], orderIds: string[]): string[] {
+  // Dedupe both sides: `currentIds` can legitimately carry the same id more
+  // than once (each project holds its own repo node, and sibling projects can
+  // share a git root — e.g. folders that live inside one repo), and a
+  // previously persisted order may already carry duplicates. Persisting them
+  // makes orderByIds render one row per occurrence.
   const current = new Set(currentIds)
-  const retained = orderIds.filter(id => current.has(id))
+  const retained = dedupeIds(orderIds.filter(id => current.has(id)))
   const retainedSet = new Set(retained)
 
-  return [...currentIds.filter(id => !retainedSet.has(id)), ...retained]
+  return [...dedupeIds(currentIds).filter(id => !retainedSet.has(id)), ...retained]
 }
 
 export function resolveManualSessionOrderIds(currentIds: string[], orderIds: string[], manual: boolean): string[] {
@@ -35,7 +43,10 @@ export function orderByIds<T>(items: T[], getId: (item: T) => string, orderIds: 
   for (const id of orderIds) {
     const item = byId.get(id)
 
-    if (item) {
+    // Skip ids already emitted: a persisted order polluted with duplicates
+    // (same repo id under several projects) must not render one row per
+    // occurrence.
+    if (item && !seen.has(id)) {
       ordered.push(item)
       seen.add(id)
     }

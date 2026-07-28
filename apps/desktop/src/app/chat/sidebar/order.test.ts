@@ -37,6 +37,11 @@ describe('orderByIds', () => {
     const items = [{ id: 'fresh' }, { id: 'a' }, { id: 'b' }]
     expect(orderByIds(items, id, ['b', 'a'])).toEqual([{ id: 'fresh' }, { id: 'b' }, { id: 'a' }])
   })
+
+  it('renders an item once even when the saved order repeats its id', () => {
+    const items = [{ id: 'a' }, { id: 'b' }]
+    expect(orderByIds(items, id, ['a', 'b', 'a', 'a'])).toEqual([{ id: 'a' }, { id: 'b' }])
+  })
 })
 
 describe('reconcileOrderIds', () => {
@@ -50,6 +55,17 @@ describe('reconcileOrderIds', () => {
 
   it('puts newly-seen ids ahead of the retained saved order', () => {
     expect(reconcileOrderIds(['fresh', 'a', 'b'], ['b', 'a', 'gone'])).toEqual(['fresh', 'b', 'a'])
+  })
+
+  it('dedupes current ids that repeat across projects (shared repo root)', () => {
+    // Sibling projects whose folders live inside one git repo each contribute a
+    // repo node with the SAME id; persisting the flatMapped list verbatim made
+    // orderByIds render one sidebar row per occurrence.
+    expect(reconcileOrderIds(['x', 'x', 'x', 'x'], ['x'])).toEqual(['x'])
+  })
+
+  it('heals a saved order already polluted with duplicate ids', () => {
+    expect(reconcileOrderIds(['fresh', 'x'], ['x', 'x', 'x', 'x'])).toEqual(['fresh', 'x'])
   })
 })
 
