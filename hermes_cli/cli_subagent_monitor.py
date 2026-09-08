@@ -29,6 +29,7 @@ class SubagentMonitor:
         self._last_poll = 0
         self.app = None
         self.opening = False
+        self.collapsed = False
 
     @property
     def selected(self):
@@ -78,10 +79,26 @@ class SubagentMonitor:
     def dock_text(self, *, columns, rows):
         if not self.entries:
             return ''
+        if self.collapsed:
+            count = f'{len(self.entries)} live'
+            # Keep both controls before spending scarce cells on activity.
+            headings = (
+                f'Subagents · {count} · Ctrl+T expand · F7 restore',
+                f'{count} · Ctrl+T expand · F7 restore',
+                f'{count} · Ctrl+T · F7',
+                count,
+            )
+            width = max(0, columns - 1)
+            heading = next((text for text in headings if get_cwidth(text) <= width), count)
+            row = self.entries[0]
+            activity = f"last: {row['last_tool']}" if row.get('last_tool') else row.get('status') or 'starting'
+            if get_cwidth(heading + ' · ' + activity) <= width:
+                heading += ' · ' + activity
+            return _clip(' ' + heading, max(0, columns))
         columns = max(0, columns - 2)
         count = min(len(self.entries), max(1, min(4, (rows - 10) // 3)))
         hidden = len(self.entries) - count
-        heading = f' Subagents · {len(self.entries)} live · F6 expand'
+        heading = f' Subagents · {len(self.entries)} live · Ctrl+T expand · F7 collapse'
         lines = [_clip(heading, columns)]
         for row in self.entries[:count]:
             activity = f"{row['elapsed']}s · " + (f"last: {row['last_tool']}" if row['last_tool'] else row.get('status') or 'starting')
@@ -89,7 +106,7 @@ class SubagentMonitor:
             goal_width = max(3, columns - get_cwidth(activity) - 5)
             lines.append(_clip(f" ● {_clip(row.get('goal'), goal_width)} · {activity}", columns))
         if hidden:
-            lines.append(_clip(f' +{hidden} more · F6 all subagents', columns))
+            lines.append(_clip(f' +{hidden} more · Ctrl+T all subagents', columns))
         return '\n'.join(' ' + line for line in lines)
 
 
@@ -169,9 +186,9 @@ def build_monitor_application(monitor, **kwargs):
         if state['steering']:
             return 'Enter send · Esc cancel' if narrow else 'Enter queues guidance · Esc cancels (does not interrupt)'
         if narrow:
-            return 'PgUp/Dn · s steer x stop · Esc' if state['detail'] else '↑↓ select Enter tail F6 close'
+            return 'PgUp/Dn · s steer x stop · Esc' if state['detail'] else '↑↓ · Enter tail · Ctrl+T close'
         return ('Esc roster · PgUp/PgDn tail · s steer · x stop' if state['detail'] else
-                '↑/↓ select · Enter tail · s steer · x stop · q/F6 close')
+                '↑/↓ select · Enter tail · s steer · x stop · q/Ctrl+T close')
 
     kb = KeyBindings()
     normal = Condition(lambda: not state['steering'] and not state['confirm'])
@@ -234,6 +251,7 @@ def build_monitor_application(monitor, **kwargs):
 
     @kb.add('q', filter=normal)
     @kb.add('f6', filter=normal)
+    @kb.add('c-t', filter=normal)
     @kb.add('c-c')
     def close(event):
         app.exit()
@@ -282,6 +300,13 @@ def open_monitor(cli):
             cli._invalidate()
 
     asyncio.get_running_loop().create_task(run())
+
+
+def toggle_dock(cli):
+    monitor = getattr(cli, '_subagent_monitor', None)
+    if monitor is not None:
+        monitor.collapsed = not monitor.collapsed
+        cli._invalidate()
 
 
 def install_dock(cli):
