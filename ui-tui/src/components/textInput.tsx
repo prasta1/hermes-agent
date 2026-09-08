@@ -1447,7 +1447,10 @@ export function TextInput({
         return swap(undo, redo)
       }
 
-      if ((mod && inp === 'y') || (mod && k.shift && inp === 'z')) {
+      // Extended-key terminals (kitty CSI-u / modifyOtherKeys) deliver a shifted
+      // letter as its uppercase char, so Cmd+Shift+Z arrives as inp 'Z' — match
+      // case-insensitively like the copy/paste chords above.
+      if ((mod && inp === 'y') || (mod && k.shift && inp.toLowerCase() === 'z')) {
         return swap(redo, undo)
       }
 
@@ -1831,6 +1834,7 @@ export const shouldPassThroughToGlobalHandler = (
   (key.ctrl && input === 'c') ||
   (key.ctrl && input === 'x') ||
   (key.ctrl && input === 'o') ||
+  (key.ctrl && input === 't') ||
   key.tab ||
   (key.shift && key.tab) ||
   key.pageUp ||
