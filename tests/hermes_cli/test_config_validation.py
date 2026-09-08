@@ -141,3 +141,39 @@ class TestUnknownTopLevelKeys:
         assert any("base_url" in i.message for i in misplaced)
         assert any("api_key" in i.message for i in misplaced)
 
+
+
+class TestStringifiedContainers:
+    """List/mapping settings stored as one quoted string must be flagged (DEV-347).
+
+    A pre-coercion ``hermes config set`` wrote ``excluded_providers: '["openai-api"]'`` and
+    ``plugins.enabled: "['a', 'b']"``; every isinstance-gated reader ignored them silently, so the
+    settings looked saved but never took effect on two machines.
+    """
+
+    @staticmethod
+    def _flagged(config):
+        return [i for i in validate_config_structure(config) if "quoted string" in i.message]
+
+    def test_json_array_string_is_flagged(self):
+        issues = self._flagged({"model_catalog": {"excluded_providers": '["openai-api", "copilot"]'}})
+        assert len(issues) == 1
+        assert issues[0].severity == "warning"
+        assert "model_catalog.excluded_providers" in issues[0].message
+        assert "hermes config set model_catalog.excluded_providers" in issues[0].hint
+
+    def test_python_repr_string_is_flagged(self):
+        issues = self._flagged({"plugins": {"enabled": "['herdr-agent-state', 'orca-status']"}})
+        assert len(issues) == 1
+        assert "plugins.enabled" in issues[0].message
+
+    def test_string_typed_schema_key_is_not_flagged(self):
+        """``approvals.mode`` is str-typed in DEFAULT_CONFIG: a bracketed value there is legitimate."""
+        assert self._flagged({"approvals": {"mode": "[off]"}}) == []
+
+    def test_real_lists_and_non_list_strings_are_not_flagged(self):
+        assert self._flagged({
+            "model_catalog": {"excluded_providers": ["openai-api"]},
+            "plugins": {"enabled": ["orca-status"]},
+            "custom_note": "[INST] not a list",
+        }) == []
