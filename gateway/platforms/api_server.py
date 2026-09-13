@@ -1381,6 +1381,13 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
             # Compare as bytes: compare_digest raises TypeError on non-ASCII str, and the
             # token is raw client input — a stray byte must 401, not 500.
             if hmac.compare_digest(token.encode(), expected_key.encode()):
+                # TEMP-AUDIT 2026-09-13: is anything off-box actually using this listener?
+                # Only non-loopback peers are logged, so a localhost-only deployment stays silent.
+                # Remove once the 0.0.0.0 vs 127.0.0.1 binding question is settled.
+                _peer = self._request_audit_context(request).get("peer_ip", "")
+                if _peer and not _peer.startswith("127.") and _peer != "::1":
+                    logger.info("API server authenticated non-local client: %s",
+                                self._request_audit_log_suffix(request))
                 return None
         logger.warning("API server rejected invalid API key: %s", self._request_audit_log_suffix(request))
         return self._auth_failed_response()
@@ -2190,8 +2197,12 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
     # -- HTTP handlers ----------------------------------------------------------------
 
     async def _handle_health(self, request: "web.Request") -> "web.Response":
-        """GET /health — simple health check."""
-        return web.json_response({"status": "ok", "platform": "hermes-agent", "version": _hermes_version()})
+        """GET /health — simple liveness check. Unauthenticated, so it must not disclose the build.
+
+        The version is still served to authenticated callers by /health/detailed; advertising it
+        here lets an unauthenticated caller match the deployment against known CVEs for that build.
+        """
+        return web.json_response({"status": "ok", "platform": "hermes-agent"})
 
     @_require_auth
     async def _handle_health_detailed(self, request: "web.Request") -> "web.Response":
