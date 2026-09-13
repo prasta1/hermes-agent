@@ -1248,7 +1248,6 @@ def _live_route_metadata(t: _TargetDelivery) -> tuple[Optional[str], dict, dict]
     # Brief embed flag: tells Discord adapter to render as native embed instead of plain text.
     if job.get("brief_embed"):
         route_metadata["brief_embed"] = True
-        logger.debug("[cron_delivery] brief_embed flag set for job_id=%s", job["id"])
     return route_thread_id, route_metadata, media_metadata
 
 

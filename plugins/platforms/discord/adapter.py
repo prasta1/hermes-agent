@@ -2859,7 +2859,6 @@ class DiscordAdapter(DiscordMediaMixin, BasePlatformAdapter):
             # Brief embed: render as a native Discord embed instead of plain text.
             if metadata and metadata.get("brief_embed"):
                 job_id = (metadata or {}).get("job_id", "?")
-                logger.info("[%s] Sending brief embed for job_id=%s (content_len=%d)", self.name, job_id, len(content))
                 result = await self._send_brief_embed(
                     channel, content, metadata, reply_to, reference, job_id
                 )
@@ -5246,13 +5245,13 @@ class DiscordAdapter(DiscordMediaMixin, BasePlatformAdapter):
         """Trim to Discord's 4096-char embed description limit (conservatively)."""
         return text if len(text) <= limit else text[: limit - 3] + "..."
 
-    def _parse_brief_content(self, content: str) -> dict:
+    @staticmethod
+    def _parse_brief_content(content: str) -> dict:
         """Parse a cron brief's wrapped output into structured sections for embed rendering.
 
         Strips the cron wrapper header/footer and splits the brief into weather, title,
         fields, color, and footer. Returns None when the content doesn't match the brief structure.
         """
-        import re
         wrapped = re.match(
             r'Cronjob Response:\s*[^\n]+\n\(job_id:\s*\w+\)\n[-]+\n\n(.*)',
             content, re.DOTALL
@@ -5268,7 +5267,7 @@ class DiscordAdapter(DiscordMediaMixin, BasePlatformAdapter):
         weather = None
         WEATHER_EMOJI = r'(🌤️|☀️|🌙)'
         weather_match = re.search(
-            f'{WEATHER_EMOJI}\s*(.+?)(?:\n\n|\n\n\*\*)', body
+            rf'{WEATHER_EMOJI}\s*(.+?)(?:\n\n|\n\n\*\*)', body
         )
         if weather_match:
             weather = f"{weather_match.group(1)} {weather_match.group(2).strip()}"
@@ -6811,7 +6810,6 @@ async def _standalone_send(
     if metadata and metadata.get("brief_embed"):
         parsed = DiscordAdapter._parse_brief_content(message)
         if parsed and parsed.get("fields"):
-            import json as _json
             embed_json = {"title": parsed.get("title") or "Hermes Brief", "color": parsed["color"]}
             if parsed.get("footer"):
                 embed_json["footer"] = {"text": parsed["footer"]}
@@ -6822,7 +6820,7 @@ async def _standalone_send(
             send_payload = {"content": parsed.get("weather"), "embeds": [embed_json]}
             if send_payload["content"] is None:
                 send_payload.pop("content")
-            message = _json.dumps(send_payload)
+            message = json.dumps(send_payload)
             _is_embed_payload = True
     try:
         from gateway.platforms.base import resolve_proxy_url, proxy_kwargs_for_aiohttp
@@ -6894,8 +6892,7 @@ async def _standalone_send(
             if message.strip() or not media_files:
                 # Brief embed payload is pre-serialized JSON; otherwise wrap as plain content.
                 if _is_embed_payload:
-                    import json as _json2
-                    _send_json = _json2.loads(message)
+                    _send_json = json.loads(message)
                 else:
                     _send_json = {"content": message}
                 async with session.post(url, headers=json_headers, json=_send_json, **_req_kw) as resp:
