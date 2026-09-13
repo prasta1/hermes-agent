@@ -2853,6 +2853,7 @@ class DiscordAdapter(DiscordMediaMixin, BasePlatformAdapter):
             # Brief embed: render as a native Discord embed instead of plain text.
             if metadata and metadata.get("brief_embed"):
                 job_id = (metadata or {}).get("job_id", "?")
+                logger.info("[%s] Sending brief embed for job_id=%s (content_len=%d)", self.name, job_id, len(content))
                 result = await self._send_brief_embed(
                     channel, content, metadata, reply_to, reference, job_id
                 )
@@ -6783,6 +6784,7 @@ async def _standalone_is_forum(aiohttp, chat_id: str, json_headers: dict, sess_k
 async def _standalone_send(
     pconfig, chat_id: str, message: str, *, thread_id: Optional[str] = None,
     media_files: Optional[list] = None, force_document: bool = False, caption: Optional[str] = None,
+    metadata: Optional[dict] = None,
 ) -> Dict[str, Any]:
     """Send via Discord REST without a live gateway adapter (token: ``pconfig.token`` then env var).
     Forum channels (type 15) reject ``POST /messages``, so a thread post is created via
@@ -6799,6 +6801,24 @@ async def _standalone_send(
         token = (get_secret("DISCORD_BOT_TOKEN", "") or "").strip()
     if not token:
         return {"error": "Discord standalone send: DISCORD_BOT_TOKEN is not set"}
+    # Brief embed: parse content and build embed payload for Discord REST.
+    _is_embed_payload = False
+    if metadata and metadata.get("brief_embed"):
+        parsed = DiscordAdapter._parse_brief_content(message)
+        if parsed and parsed.get("fields"):
+            import json as _json
+            embed_json = {"title": parsed.get("title") or "Hermes Brief", "color": parsed["color"]}
+            if parsed.get("footer"):
+                embed_json["footer"] = {"text": parsed["footer"]}
+            fields_json = []
+            for name, value, inline in parsed["fields"]:
+                fields_json.append({"name": name, "value": value[:1024], "inline": inline})
+            embed_json["fields"] = fields_json
+            send_payload = {"content": parsed.get("weather"), "embeds": [embed_json]}
+            if send_payload["content"] is None:
+                send_payload.pop("content")
+            message = _json.dumps(send_payload)
+            _is_embed_payload = True
     try:
         from gateway.platforms.base import resolve_proxy_url, proxy_kwargs_for_aiohttp
         _proxy = resolve_proxy_url(platform_env_var="DISCORD_PROXY")
@@ -6867,7 +6887,13 @@ async def _standalone_send(
             url = f"https://discord.com/api/v10/channels/{chat_id}/messages"
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30), **_sess_kw) as session:
             if message.strip() or not media_files:
-                async with session.post(url, headers=json_headers, json={"content": message}, **_req_kw) as resp:
+                # Brief embed payload is pre-serialized JSON; otherwise wrap as plain content.
+                if _is_embed_payload:
+                    import json as _json2
+                    _send_json = _json2.loads(message)
+                else:
+                    _send_json = {"content": message}
+                async with session.post(url, headers=json_headers, json=_send_json, **_req_kw) as resp:
                     last_data, err = await _standalone_response_json_or_error(resp, "Discord API error")
                     if err:
                         return err
