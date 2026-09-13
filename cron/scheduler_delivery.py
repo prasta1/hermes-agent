@@ -1245,6 +1245,9 @@ def _live_route_metadata(t: _TargetDelivery) -> tuple[Optional[str], dict, dict]
     if t.origin_target and t.origin.get("scope_id"):
         route_metadata.setdefault("scope_id", str(t.origin["scope_id"]))
         media_metadata.setdefault("scope_id", str(t.origin["scope_id"]))
+    # Brief embed flag: tells Discord adapter to render as native embed instead of plain text.
+    if job.get("brief_embed"):
+        route_metadata["brief_embed"] = True
     return route_thread_id, route_metadata, media_metadata
 
 
@@ -1468,7 +1471,8 @@ def _standalone_send(
     def _send():
         return _send_to_platform(
             t.platform, t.pconfig, t.chat_id, content, thread_id=t.thread_id,
-            media_files=media_files)
+            media_files=media_files,
+            metadata={"brief_embed": True} if job.get("brief_embed") else None)
 
     def _warned(msg: str) -> tuple[None, str]:
         logger.warning("Job '%s': %s", job["id"], msg)

@@ -2855,12 +2855,19 @@ class DiscordAdapter(DiscordMediaMixin, BasePlatformAdapter):
             if self._is_forum_parent(channel):
                 result = await self._send_to_forum(channel, content)
                 return await self._record_response_async(reply_to, result, content, final_delivery)
+            reference = self._reply_reference_for_send(reply_to, channel)
+            # Brief embed: render as a native Discord embed instead of plain text.
+            if metadata and metadata.get("brief_embed"):
+                job_id = (metadata or {}).get("job_id", "?")
+                result = await self._send_brief_embed(
+                    channel, content, metadata, reply_to, reference, job_id
+                )
+                return await self._record_response_async(reply_to, result, content, final_delivery)
             formatted = self.format_message(content)
             chunks = self._cap_split_chunks(
                 self.truncate_message(formatted, self.MAX_MESSAGE_LENGTH)
             )
             message_ids = []
-            reference = self._reply_reference_for_send(reply_to, channel)
             for i, chunk in enumerate(chunks):
                 if self._reply_to_mode == "all":
                     chunk_reference = reference
@@ -5238,6 +5245,88 @@ class DiscordAdapter(DiscordMediaMixin, BasePlatformAdapter):
         """Trim to Discord's 4096-char embed description limit (conservatively)."""
         return text if len(text) <= limit else text[: limit - 3] + "..."
 
+    @staticmethod
+    def _parse_brief_content(content: str) -> dict:
+        """Parse a cron brief's wrapped output into structured sections for embed rendering.
+
+        Strips the cron wrapper header/footer and splits the brief into weather, title,
+        fields, color, and footer. Returns None when the content doesn't match the brief structure.
+        """
+        wrapped = re.match(
+            r'Cronjob Response:\s*[^\n]+\n\(job_id:\s*\w+\)\n[-]+\n\n(.*)',
+            content, re.DOTALL
+        )
+        if not wrapped:
+            return None
+        body = wrapped.group(1)
+        body = re.split(r'\n\nTo stop or manage this job', body)[0].strip()
+        if '## Response' in body:
+            body = body.split('## Response\n', 1)[-1].strip()
+        elif '## Prompt' in body:
+            body = body.split('## Prompt\n', 1)[0].strip()
+        weather = None
+        WEATHER_EMOJI = r'(🌤️|☀️|🌙)'
+        weather_match = re.search(
+            rf'{WEATHER_EMOJI}\s*(.+?)(?:\n\n|\n\n\*\*)', body
+        )
+        if weather_match:
+            weather = f"{weather_match.group(1)} {weather_match.group(2).strip()}"
+            body = body[:weather_match.start()] + body[weather_match.end():]
+        has_critical = bool(re.search(r'(DOWN|🔴|Critical|critical)', body))
+        has_issues = bool(re.search(r'(down|DOWN|⚠️|drift|conflict|Drift|Conflict)', body))
+        has_recovery = bool(re.search(r'(🟢|recovered|back)', body))
+        if has_critical:
+            color = 0xe04343
+        elif has_recovery and not has_issues:
+            color = 0x4f9e5f
+        elif has_issues:
+            color = 0xe0a343
+        else:
+            color = 0x5865f2
+        lines = body.split('\n')
+        fields = []
+        current_section = None
+        current_lines = []
+        for line in lines:
+            header_match = re.match(r'^\*\*(.+?)\*\*$', line.strip())
+            if header_match and not line.strip().startswith('-'):
+                if current_section and current_lines:
+                    fields.append((current_section, '\n'.join(current_lines), False))
+                current_section = header_match.group(1)
+                current_lines = []
+            elif line.strip():
+                current_lines.append(line.strip())
+        if current_section and current_lines:
+            fields.append((current_section, '\n'.join(current_lines), False))
+        title_match = re.match(r'Cronjob Response:\s*(.+)', content)
+        title = title_match.group(1).strip() if title_match else None
+        footer_match = re.search(r'(next brief|next run|next [0-9:]+|[0-9]+ other services.*\d+h\b)', content)
+        footer = footer_match.group(1).strip() if footer_match else None
+        return {'weather': weather, 'title': title, 'fields': fields, 'color': color, 'footer': footer}
+
+    async def _send_brief_embed(self, channel, content, metadata, reply_to, reference, job_id):
+        """Send a cron brief as a Discord embed (Option 1a). Weather in message content, rest in embed."""
+        import discord as _discord
+        parsed = self._parse_brief_content(content)
+        if not parsed or not parsed['fields']:
+            formatted = self.format_message(content)
+            chunks = self._cap_split_chunks(self.truncate_message(formatted, self.MAX_MESSAGE_LENGTH))
+            message_ids = []
+            for i, chunk in enumerate(chunks):
+                chunk_ref = reference if i == 0 else None
+                msg = await channel.send(content=chunk, reference=chunk_ref)
+                message_ids.append(str(msg.id))
+            return SendResult(success=True, message_id=message_ids[0] if message_ids else None, raw_response={"message_ids": message_ids})
+        embed = _discord.Embed(title=parsed.get('title') or "Hermes Brief", color=parsed['color'])
+        embed.set_footer(text=parsed.get('footer') or f"job_id: {job_id}")
+        for name, value, inline in parsed['fields']:
+            if len(value) > 1024:
+                value = value[:1021] + "..."
+            embed.add_field(name=name, value=value, inline=inline)
+        message_content = parsed.get('weather') or None
+        msg = await channel.send(content=message_content, embed=embed, reference=reference)
+        return SendResult(success=True, message_id=str(msg.id), raw_response={"message_ids": [str(msg.id)]})
+
     async def send_exec_approval(
         self, chat_id: str, command: str, session_key: str, description: str = "dangerous command",
         metadata: Optional[dict] = None, allow_permanent: bool = True, allow_session: bool = True,
@@ -6699,6 +6788,7 @@ async def _standalone_is_forum(aiohttp, chat_id: str, json_headers: dict, sess_k
 async def _standalone_send(
     pconfig, chat_id: str, message: str, *, thread_id: Optional[str] = None,
     media_files: Optional[list] = None, force_document: bool = False, caption: Optional[str] = None,
+    metadata: Optional[dict] = None,
 ) -> Dict[str, Any]:
     """Send via Discord REST without a live gateway adapter (token: ``pconfig.token`` then env var).
     Forum channels (type 15) reject ``POST /messages``, so a thread post is created via
@@ -6715,6 +6805,23 @@ async def _standalone_send(
         token = (get_secret("DISCORD_BOT_TOKEN", "") or "").strip()
     if not token:
         return {"error": "Discord standalone send: DISCORD_BOT_TOKEN is not set"}
+    # Brief embed: parse content and build embed payload for Discord REST.
+    _is_embed_payload = False
+    if metadata and metadata.get("brief_embed"):
+        parsed = DiscordAdapter._parse_brief_content(message)
+        if parsed and parsed.get("fields"):
+            embed_json = {"title": parsed.get("title") or "Hermes Brief", "color": parsed["color"]}
+            if parsed.get("footer"):
+                embed_json["footer"] = {"text": parsed["footer"]}
+            fields_json = []
+            for name, value, inline in parsed["fields"]:
+                fields_json.append({"name": name, "value": value[:1024], "inline": inline})
+            embed_json["fields"] = fields_json
+            send_payload = {"content": parsed.get("weather"), "embeds": [embed_json]}
+            if send_payload["content"] is None:
+                send_payload.pop("content")
+            message = json.dumps(send_payload)
+            _is_embed_payload = True
     try:
         from gateway.platforms.base import resolve_proxy_url, proxy_kwargs_for_aiohttp
         _proxy = resolve_proxy_url(platform_env_var="DISCORD_PROXY")
@@ -6783,7 +6890,12 @@ async def _standalone_send(
             url = f"https://discord.com/api/v10/channels/{chat_id}/messages"
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30), **_sess_kw) as session:
             if message.strip() or not media_files:
-                async with session.post(url, headers=json_headers, json={"content": message}, **_req_kw) as resp:
+                # Brief embed payload is pre-serialized JSON; otherwise wrap as plain content.
+                if _is_embed_payload:
+                    _send_json = json.loads(message)
+                else:
+                    _send_json = {"content": message}
+                async with session.post(url, headers=json_headers, json=_send_json, **_req_kw) as resp:
                     last_data, err = await _standalone_response_json_or_error(resp, "Discord API error")
                     if err:
                         return err
