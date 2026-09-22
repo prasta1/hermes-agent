@@ -1245,3 +1245,21 @@ def test_missing_incarnation_on_either_side_fails_closed(monkeypatch):
             "supervisor": "manual-serve",
         }
     ]
+
+
+def test_desktop_owned_survivor_is_stopped_so_the_app_respawns_it(monkeypatch):
+    """A Desktop-spawned serve still on pre-update code is SIGTERMed (the app respawns it);
+    a manual serve, which nothing would respawn, is left alone."""
+    from hermes_cli import update_cmd_fleet as fleet
+
+    alive = {111: True, 222: True}
+    killed = []
+    monkeypatch.setattr("hermes_cli.process_identity._pid_alive_matches", lambda pid, created: alive.get(pid))
+    monkeypatch.setattr(fleet.os, "kill", lambda pid, sig: (killed.append(pid), alive.__setitem__(pid, False)))
+    plan = _plan(_runtime("serve", "default", "desktop", 111), _runtime("serve", "default", "manual-serve", 222))
+    rows = [{"pid": 111, "kind": "serve", "supervisor": "desktop"}, {"pid": 222, "kind": "serve", "supervisor": "manual-serve"}]
+    killed_pids: set = set()
+
+    assert fleet._stop_stale_desktop_serves(plan, rows, killed_pids) == [111]
+    assert killed == [111]
+    assert killed_pids == {111}

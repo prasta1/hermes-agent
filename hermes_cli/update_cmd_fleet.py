@@ -1873,6 +1873,41 @@ def _restarted_units_gone(scoped_units) -> bool:
     return True
 
 
+def _stop_stale_desktop_serves(plan, rows, killed_pids) -> list[int]:
+    """SIGTERM every surviving pre-update serve the Desktop app spawned so the app relaunches
+    it on the pulled code, and wait briefly for the exits. Returns the pids signalled.
+
+    #111494 left Desktop-owned serves untouched because the updater has no relaunch authority
+    over them — but the app itself does: its supervisor treats a ready child's exit as a crash
+    and respawns it (``apps/desktop/electron/main.ts`` ``scheduleUnexpectedPrimaryRecovery``),
+    and it polls an attached backend every 15s for the same reason. Left alone, the stale
+    backend fails every tool call with an ``ImportError`` for symbols that import fine on disk
+    until someone quits the app by hand. Only runs when the checkout SHA actually moved and only
+    for the recorded incarnation, so an idle re-run or a PID reused by a fresh backend is never
+    signalled.
+    """
+    # ponytail: an in-flight Desktop turn is dropped; drain via the serve API if that ever matters.
+    import signal as _signal
+    from hermes_cli.process_identity import _pid_alive_matches
+    created = {
+        r.pid: (getattr(r, "detail", None) or {}).get("create_time")
+        for r in getattr(plan, "runtimes", ()) or () if getattr(r, "kind", None) in ("serve", "dashboard")}
+    stopped: list[int] = []
+    for row in rows or []:
+        pid = row.get("pid")
+        if row.get("supervisor") != "desktop" or _pid_alive_matches(pid, created.get(pid)) is not True:
+            continue
+        with suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, _signal.SIGTERM)
+            killed_pids.add(pid)
+            stopped.append(pid)
+            print(f"  ✓ Stopped Desktop-owned {row.get('kind')} pid {pid} — the Desktop app relaunches it on the new code")
+    deadline = _time.monotonic() + 5.0
+    while stopped and _time.monotonic() < deadline and any(_pid_alive_matches(p, created.get(p)) for p in stopped):
+        _time.sleep(0.2)
+    return stopped
+
+
 def _verify_fleet_after_update(restart, *, _pre_update_plan, _windows_gateway_resume, node_failures, update_complete):
     """Post-restart verification: legacy-unit warning, dashboard cleanup, stale serve
     probe, fleet version matrix, plan-vs-execution reconciliation, receipt finalize.
@@ -1904,6 +1939,10 @@ def _verify_fleet_after_update(restart, *, _pre_update_plan, _windows_gateway_re
     _stale_serve_rows: "list | None" = None
     with _best_effort('Failed to check for surviving serve runtimes: %s'):
         _stale_serve_rows = _surviving_pre_update_serve_runtimes(_pre_update_plan)
+        _pre_sha, _post_sha = getattr(_pre_update_plan, "expected_sha", None), _current_checkout_sha()
+        if _stale_serve_rows and _pre_sha and _post_sha and _pre_sha != _post_sha:
+            if _stop_stale_desktop_serves(_pre_update_plan, _stale_serve_rows, restart.killed_pids):
+                _stale_serve_rows = _surviving_pre_update_serve_runtimes(_pre_update_plan)
         if _stale_serve_rows:
             _warn_stale_serve_runtimes(_stale_serve_rows)
 
