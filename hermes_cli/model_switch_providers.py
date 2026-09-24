@@ -707,11 +707,15 @@ class _PickerBuild:
         """Prefer the live env override (e.g. DASHSCOPE_BASE_URL) over the static inference_base_url
         so dedup matches what a user typing that URL into custom_providers would actually hit."""
         from hermes_cli.auth import PROVIDER_REGISTRY
-        pcfg = PROVIDER_REGISTRY.get(slug)
+        from hermes_cli.providers import get_provider
+        # models.dev-only built-ins (e.g. openrouter) have no PROVIDER_REGISTRY entry; resolve them
+        # through the catalog/overlay so their endpoint is deduped like every other built-in row,
+        # instead of letting a providers.<id> entry shadow them into a second, identically-named row.
+        pcfg = PROVIDER_REGISTRY.get(slug) or get_provider(slug, allow_network=False)
         if not pcfg:
             return
         url = os.environ.get(pcfg.base_url_env_var, "") if getattr(pcfg, "base_url_env_var", "") else ""
-        normed = _norm_url(url or getattr(pcfg, "inference_base_url", "") or "")
+        normed = _norm_url(url or getattr(pcfg, "inference_base_url", "") or getattr(pcfg, "base_url", "") or "")
         if normed:
             self.builtin_endpoints.add(normed)
 

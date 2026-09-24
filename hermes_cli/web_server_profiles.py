@@ -176,7 +176,7 @@ def _fallback_profile_dicts(profiles_mod) -> List[Dict[str, Any]]:
             entries = sorted(scan, key=lambda e: e.name)
         for entry in entries:
             home = Path(entry.path)
-            if not entry.is_dir() or not profiles_mod._PROFILE_ID_RE.match(entry.name):
+            if not entry.is_dir() or entry.name == "default" or not profiles_mod._PROFILE_ID_RE.match(entry.name):
                 continue
             profiles.append(_fallback_profile_entry(
                 profiles_mod, entry.name, home, is_default=False,
