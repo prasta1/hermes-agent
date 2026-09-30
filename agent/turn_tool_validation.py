@@ -88,6 +88,12 @@ def validate_tool_calls(
     # Uniquify duplicate tool-call ids BEFORE any downstream consumer: the
     # pre-API sanitizer keeps only the first call/result per id.
     agent._uniquify_tool_call_ids(tool_calls)
+    # A provider that mints its own parallel ids rejects the REPLAY of that turn (502, no field
+    # naming the message) and the ids are persisted, so the session stays wedged across retries,
+    # /model and fallbacks. Re-key to deterministic Hermes ids before any consumer reads them.
+    from agent.message_sanitization import normalize_vendor_tool_call_ids
+
+    normalize_vendor_tool_call_ids(tool_calls)
 
     # Repair mismatched tool names before validating (model hallucinations).
     repaired_ids = set()

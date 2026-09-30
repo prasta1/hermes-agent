@@ -456,6 +456,7 @@ __all__ = [
     # call_id policy owners
     "deterministic_call_id", "coalesce_tool_call_id", "tool_call_id_variants",
     "tool_result_id_variants", "uniquify_tool_call_ids",
+    "normalize_vendor_tool_call_ids",
     # reasoning_content policy owners
     "reasoning_echo_family", "matches_reasoning_echo_family", "needs_reasoning_echo",
     "stale_thinking_reaches_wire", "apply_reasoning_content_policy", "reapply_reasoning_echo",
@@ -568,6 +569,81 @@ def uniquify_tool_call_ids(tool_calls: list) -> list:
             "call/result pairing lossless.", cid, new_id, _fn_name,
         )
     return tool_calls
+
+
+# -- provider-minted tool-call id normalization: one owner ----------------------------
+# Some OpenAI-compatible gateways mint their own tool-call ids (e.g. ``chatcmpl-tool-<hex>``)
+# instead of the ``call_*`` shape, and reject a REPLAYED assistant turn that carries two or more
+# parallel calls whose ids all share that vendor prefix — the request comes back
+# ``502 {"error_type": "provider_unavailable", "message": "JSON error injected into SSE stream"}``
+# with no field naming the offending message. Verified against inference-api.nousresearch.com
+# (2026-09-30): one call with a ``chatcmpl-tool-`` id replays fine; two or more 502 on every
+# attempt, so the session is permanently wedged because the ids are PERSISTED and re-sent.
+#
+# Why here and not at the provider boundary: the ids reach state.db through
+# ``_assistant_tool_call_dict``, so rewriting at mint time keeps the stored row and every later
+# replay consistent — no second code path, no migration of existing rows.
+#
+# Scope is deliberately narrow, because these ids feed prompt-cache prefixes:
+#   * ONLY when a turn has >= 2 parallel calls. A single provider id is left byte-identical, so
+#     the overwhelmingly common case keeps its exact cached prefix.
+#   * ONLY for ids matching a known vendor prefix (see ``_VENDOR_TOOL_CALL_ID_PREFIXES``).
+#   * The replacement is DETERMINISTIC (sha256 of the old id) — never uuid4 — so re-minting the
+#     same turn twice yields the same id and the cache prefix stays stable, matching the
+#     invariant documented above ``deterministic_call_id``.
+#   * Mutates in place, like ``uniquify_tool_call_ids``, so the tool-result rows keyed off the
+#     same objects in ``validate_tool_calls`` follow automatically.
+_VENDOR_TOOL_CALL_ID_PREFIXES: tuple[str, ...] = ("chatcmpl-tool-",)
+
+
+def _vendor_minted_tool_call_id(raw: Any) -> bool:
+    """True when ``raw`` is a known vendor-minted id rather than Hermes' ``call_*`` shape."""
+    return isinstance(raw, str) and raw.startswith(_VENDOR_TOOL_CALL_ID_PREFIXES)
+
+
+def normalize_vendor_tool_call_ids(tool_calls: list) -> list:
+    """Re-key a parallel tool-call batch whose ids all carry one vendor prefix.
+
+    Providers that mint their own ids accept them on the turn that produced them but 502 the
+    REPLAY when a message holds two or more of them, which deadlocks the session: every
+    subsequent request re-sends the persisted ids and fails identically, so retries, ``/model``
+    and fallback providers all change nothing. Rewriting to a deterministic Hermes id at mint
+    time keeps call/result pairing intact and the replay acceptable.
+
+    Single-call turns and already-``call_*`` batches are untouched (no cache churn). Mutates
+    entries in place and returns ``tool_calls``.
+    """
+    calls = list(tool_calls or [])
+    if len(calls) < 2:
+        return calls
+    raw_ids = []
+    for tc in calls:
+        raw = _tc_field(tc, "call_id") or _tc_field(tc, "id") or ""
+        raw_ids.append(raw.strip() if isinstance(raw, str) else "")
+    if not all(_vendor_minted_tool_call_id(i) for i in raw_ids):
+        return calls
+
+    renamed: list[str] = []
+    for tc, old in zip(calls, raw_ids):
+        seed = hashlib.sha256(old.encode("utf-8", errors="replace")).hexdigest()[:24]
+        new_id = f"call_{seed}"
+        renamed.append(new_id)
+        try:
+            # Keep a composite id's response-item half so the provider's fc_/item id survives.
+            existing = _tc_field(tc, "id")
+            _tc_set(tc, "id", f"{new_id}|{existing.split('|', 1)[1]}" if isinstance(existing, str) and "|" in existing else new_id)
+            if _tc_field(tc, "call_id"):
+                _tc_set(tc, "call_id", new_id)
+        except Exception:
+            logger.warning("Could not normalize vendor tool call id %s", old)
+            continue
+
+    logger.warning(
+        "Provider minted %d parallel tool call ids sharing one vendor prefix (%s), which it rejects on "
+        "replay; renamed to deterministic Hermes ids (%s) to keep the session usable.",
+        len(calls), _VENDOR_TOOL_CALL_ID_PREFIXES[0], renamed[0],
+    )
+    return calls
 
 
 # -- reasoning_content policy: single owner of strip-vs-re-pad; adapters keep only SYNTAX --
