@@ -50,46 +50,52 @@ def _platform_default_is_valid(
         return False
 
 
-def _known_plugin_toolsets(known: object, platform: object) -> set:
-    """Plugin toolset names *known_plugin_toolsets* declares for *platform* (empty when absent).
+def saved_toolset_resolver(config: dict) -> Callable[[str], bool]:
+    """``is_valid_toolset`` for a saved ``platform_toolsets`` list, mirroring what
+    ``tools_config._get_platform_tools`` lets through: registered toolsets, any configured MCP server
+    (a disabled one is inactive, not a typo), ``hermes-<platform>`` plugin-platform bundles and the
+    ``no_mcp`` sentinel. The manifest scan and the plugin lookup (which may run plugin discovery)
+    happen only for a name the cheaper checks cannot place."""
+    from functools import cache
 
-    ``hermes tools`` writes this section on every save, so it is the config's own record of which
-    plugin-provided toolsets are legitimate. Scoped per platform on purpose: a name declared for
-    one platform must not mask a typo under another.
-    """
-    if not isinstance(known, dict):
-        return set()
-    names = known.get(platform)
-    if isinstance(names, str):  # legacy single-string entry
-        return {names}
-    if not isinstance(names, list):
-        return set()
-    return {n for n in names if isinstance(n, str) and n}
+    from toolsets import validate_toolset
+
+    mcp_servers = config.get("mcp_servers")
+    known = {str(name) for name in mcp_servers} if isinstance(mcp_servers, dict) else set()
+    known.add("no_mcp")
+
+    @cache
+    def platform_bundles() -> frozenset:
+        from hermes_cli.config import _platform_plugin_manifests
+
+        return frozenset(f"hermes-{name}" for name, _manifest in _platform_plugin_manifests())
+
+    @cache
+    def plugin_names() -> frozenset:
+        from hermes_cli.plugins import get_plugin_toolset_keys_nowait, get_portable_mcp_server_names_nowait
+
+        return frozenset(get_plugin_toolset_keys_nowait() | get_portable_mcp_server_names_nowait())
+
+    return lambda name: (validate_toolset(name) or name in known
+                         or name in platform_bundles() or name in plugin_names())
 
 
 def validate_platform_toolsets(
     platform_toolsets: object, is_valid_toolset: Callable[[str], bool],
     is_allowed_for_platform: Callable[[str, str], bool] = toolset_allowed_for_platform,
-    known_plugin_toolsets: object = None,
 ) -> List[str]:
     """Return human-readable warnings for a ``platform_toolsets`` mapping.
     Reports: a toolset name ``is_valid_toolset`` rejects (suggesting ``hermes-<platform>`` when that
     would have been valid); a non-empty mapping resolving to zero valid toolsets (agent would start with
     no tools); a platform with no valid toolsets, checked per-platform because the global net is
     suppressed once any platform is valid; and non-list platform values, which fall back to the platform
-    default. ``is_valid_toolset`` is injected so this does no registry imports or I/O.
-
-    ``known_plugin_toolsets`` is the raw config section of the same name (``{platform: [name, ...]}``).
-    Plugin toolsets register only after plugins load, which is after config validation runs, so
-    ``is_valid_toolset`` alone reports every one of them as unknown; names listed there for the
-    platform are accepted rather than warned about."""
+    default. ``is_valid_toolset`` is injected so this does no registry imports or I/O."""
     warnings: List[str] = []
     if not isinstance(platform_toolsets, dict) or not platform_toolsets:
         return warnings
 
     valid_count = 0
     for platform, raw in platform_toolsets.items():
-        known = _known_plugin_toolsets(known_plugin_toolsets, platform)
         default = _platform_default_toolset(platform)
         default_valid = _platform_default_is_valid(platform, default, is_valid_toolset, is_allowed_for_platform)
         platform_valid_count = 0
@@ -115,13 +121,10 @@ def validate_platform_toolsets(
         for name in toolsets:
             if not isinstance(name, str) or not name:
                 continue
-            # A declared plugin toolset is valid even though the registry cannot confirm it yet,
-            # and is_allowed_for_platform would reject it for the same not-yet-loaded reason.
-            known_plugin = name in known
-            if not is_valid_toolset(name) and not known_plugin:
+            if not is_valid_toolset(name):
                 hint = f" — did you mean '{default}'?" if default_valid else ""
                 warnings.append(f"platform '{platform}' references unknown toolset '{name}'{hint}")
-            elif known_plugin or is_allowed_for_platform(name, str(platform)):
+            elif is_allowed_for_platform(name, str(platform)):
                 valid_count += 1
                 platform_valid_count += 1
             else:
