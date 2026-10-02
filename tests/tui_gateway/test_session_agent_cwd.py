@@ -10,8 +10,7 @@ import pytest
 from agent import codex_runtime, runtime_cwd
 from agent.transports import codex_app_server_session
 from hermes_state import SessionDB
-from plugins.memory.honcho import HonchoMemoryProvider
-from plugins.memory.honcho.client import HonchoClientConfig
+from tests.tui_gateway._memory_identity_stub import StubMemoryProvider
 from run_agent import AIAgent
 from tools import terminal_tool
 
@@ -37,17 +36,13 @@ def workspace_runtime(monkeypatch, tmp_path):
     monkeypatch.setattr("model_tools.get_tool_definitions", lambda *a, **k: [])
     monkeypatch.setattr("model_tools.check_toolset_requirements", lambda *a, **k: {})
     monkeypatch.setattr("agent.process_bootstrap.OpenAI", MagicMock())
-    monkeypatch.setattr("hermes_cli.config.load_config_readonly", lambda: {"memory": {"provider": "honcho"}})
-    # Real Honcho initialization/routing, but tools-only lazy mode never creates peers.
-    config = HonchoClientConfig(
-        enabled=True, api_key="test-key", session_strategy="per-directory",
-        recall_mode="tools", init_on_session_start=False,
-    )
-    monkeypatch.setattr(HonchoClientConfig, "from_global_config", lambda *a, **k: config)
+    monkeypatch.setattr("hermes_cli.config.load_config_readonly", lambda: {"memory": {"provider": "stub"}})
     providers, agents, starts, network_attempts = [], [], [], []
 
     def load_provider(*a, **k):
-        provider = HonchoMemoryProvider()
+        # The stub records the identity it was handed; the assertions below check
+        # that a workspace move never re-derives it.
+        provider = StubMemoryProvider(**k)
         providers.append(provider)
         return provider
 
