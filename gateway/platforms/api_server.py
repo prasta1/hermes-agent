@@ -2422,9 +2422,13 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
 
     # -- HTTP handlers ----------------------------------------------------------------
 
-    async def _handle_health(self, request: web.Request) -> web.Response:
-        """GET /health — simple health check."""
-        return web.json_response({"status": "ok", "platform": "hermes-agent", "version": _hermes_version()})
+    async def _handle_health(self, request: "web.Request") -> "web.Response":
+        """GET /health — simple liveness check. Unauthenticated, so it must not disclose the build.
+
+        The version is still served to authenticated callers by /health/detailed; advertising it
+        here lets an unauthenticated caller match the deployment against known CVEs for that build.
+        """
+        return web.json_response({"status": "ok", "platform": "hermes-agent"})
 
     @_require_auth
     async def _handle_health_detailed(self, request: web.Request) -> web.Response:

@@ -3933,6 +3933,7 @@ export const en: Translations = {
     onLatest: "You're on the latest version.",
     installing: 'An update is currently installing.',
     cantReach: "We couldn't reach the update server.",
+    localOnly: branch => `You're on a custom branch (${branch}). Updates merge into it rather than switching off your patches.`,
     tapCheck: 'Tap "Check now" to look for updates.',
     updateReady: count => `A new update is ready (${count} change${count === 1 ? '' : 's'} included).`,
     updateReadyUnknown: 'A new update is ready.',

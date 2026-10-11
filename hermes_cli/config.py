@@ -1400,7 +1400,10 @@ def _disable_suspicious_mcp_servers(results: dict[str, Any], quiet: bool) -> Non
 
 def _warn_invalid_platform_toolsets(results: dict[str, Any], quiet: bool) -> None:
     """Surface invalid toolset names in platform_toolsets: ``resolve_toolset()`` returns [] for an
-    unknown name, silently disabling the affected tools. Best-effort; never blocks migration."""
+    unknown name, silently disabling the affected tools. Best-effort; never blocks migration.
+
+    ``known_plugin_toolsets`` rides along so plugin toolsets — which register only after plugins
+    load, i.e. after this runs — are not reported as unknown on every migration."""
     try:
         from hermes_cli.toolset_validation import saved_toolset_resolver, validate_platform_toolsets
 

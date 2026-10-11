@@ -1600,6 +1600,15 @@ export interface BackendUpdateCheckResponse {
   update_command: string | null
   message: string | null
   commits?: BackendUpdateCommit[]
+  /** True when the backend checkout is on a branch that only exists in a fork
+   *  (the official origin does not advertise it). Not a network failure. */
+  localOnly?: boolean
+  /** The branch the source check compared against. */
+  branch?: string
+  /** The branch actually checked out on the backend. */
+  currentBranch?: string
+  /** True when the backend checkout has uncommitted changes. */
+  dirty?: boolean
 }
 
 export interface AuxiliaryTaskAssignment {

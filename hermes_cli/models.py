@@ -2659,6 +2659,51 @@ def _probe_result(
         "used_fallback": used_fallback}
 
 
+
+def _is_known_embeddder(item: dict) -> bool:
+    """True when a catalog entry from an embedding host is an embedder, not a chat or
+    other generation surface.
+
+    The embedding host here publishes no single tag field and its
+    ``architecture.input_modalities`` is ["text"] for every model, so there's no one-
+    field discriminator. The signal is the host's own ``description`` field, which
+    consistently prefixes real embedders with "Embeddings, ...". Generation surfaces
+    (image/video) are dropped the same way chat catalogs do, via the existing
+    ``chat_catalog`` machinery, so nothing generation-only leaks.
+
+    Fail-open to never drop anything.
+    """
+    if not isinstance(item, dict):
+        return False
+    desc = str(item.get("description") or "").lower()
+    if desc.startswith("embeddings") or desc.startswith("embedding"):
+        return True
+    return not _is_generation_only(item)
+
+
+def _is_generation_only(item: dict) -> bool:
+    """Approx a generation-only model (image/video) by name shape or capability type."""
+    from hermes_cli.chat_catalog import model_id_is_generation
+
+    if model_id_is_generation(item.get("id")):
+        return True
+    caps = item.get("capabilities")
+    if isinstance(caps, dict):
+        model_type = str(caps.get("type") or "").lower()
+        if model_type in {
+            "image", "image-generation", "image-gen",
+            "video", "video-generation", "video-gen",
+        }:
+            return True
+        tags = caps.get("tags")
+        if isinstance(tags, list) and any(
+            str(t).lower() in {"image-gen", "video-gen", "image-generation", "video-generation"}
+            for t in tags
+        ):
+            return True
+    return False
+
+
 def probe_api_models(
     api_key: Optional[str], base_url: Optional[str], timeout: float = 5.0,
     api_mode: Optional[str] = None, request_headers: Optional[dict[str, str]] = None,
@@ -2725,7 +2770,18 @@ def probe_api_models(
 
         probed = []
         for item in data.get("data", []):
-            if isinstance(item, dict) and note_catalog_item(item):
+            if not isinstance(item, dict):
+                continue
+            if note_catalog_item(item):
+                # Known generation surface (image-gen / video-gen / ...). Drop for the
+                # same reason as everywhere else: a chat pickers never wanted it. This
+                # already excludes flux/sdxl/image/video names so no chat model leaks.
+                continue
+            if api_mode == "embeddings" and not _is_known_embeddder(item):
+                # Embedding surface: only models the embedding host itself labels as an
+                # embedder (its ``description`` field, e.g. "Embeddings, 1024 dims...")
+                # may surface. Chat / vision / coding models served on the same host
+                # would otherwise leak into the embedding section.
                 continue
             probed.append(item.get("id", ""))
         return _probe_result(
