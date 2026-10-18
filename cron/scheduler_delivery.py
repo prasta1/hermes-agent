@@ -1234,6 +1234,9 @@ def _live_route_metadata(t: _TargetDelivery) -> tuple[Optional[str], dict, dict]
     # Relay egress discriminators (scope_id / user_id) from the persisted origin: the adapter's caches are cold
     # after a restart. See cron/scheduler_delivery_origin.py.
     _origin.stamp_origin_discriminators(t, route_metadata, media_metadata)
+    # Brief embed flag: tells Discord adapter to render as native embed instead of plain text.
+    if job.get("brief_embed"):
+        route_metadata["brief_embed"] = True
     return route_thread_id, route_metadata, media_metadata
 
 

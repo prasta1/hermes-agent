@@ -1173,6 +1173,7 @@ from plugins.platforms.discord.adapter_media import DiscordMediaMixin
 from plugins.platforms.discord.standalone_rest import api_url as _rest_url, post_paced as _post_paced
 from plugins.platforms.discord.adapter_opus import load_opus_codec
 from plugins.platforms.discord.adapter_authorization import DiscordAuthorizationMixin, is_automated_message
+from plugins.platforms.discord import brief_embed  # local patch: infra briefs as native embeds
 from plugins.platforms.discord.adapter_slash_auth import DiscordSlashAuthMixin
 from plugins.platforms.discord.adapter_live_gates import DiscordLiveGatesMixin
 from plugins.platforms.discord.adapter_command_sync import DiscordCommandSyncMixin, app_command_scopes
@@ -3037,6 +3038,10 @@ class DiscordAdapter(DiscordLiveGatesMixin, DiscordCommandSyncMixin, DiscordAuth
             if self._is_forum_parent(channel):
                 result = await self._send_to_forum(channel, content)
                 return await self._record_response_async(reply_to, result, content, final_delivery, metadata)
+            if metadata and metadata.get("brief_embed"):  # local patch: infra briefs as native embeds
+                result = await brief_embed.send(self, channel, content, metadata, reply_to)
+                if result is not None:
+                    return await self._record_response_async(reply_to, result, content, final_delivery, metadata)
             formatted = self.format_message(content)
             chunks = self.truncate_message(formatted, self.MAX_MESSAGE_LENGTH)
             message_ids = []
@@ -6795,6 +6800,7 @@ async def _standalone_is_forum(aiohttp, chat_id: str, json_headers: dict, sess_k
 async def _standalone_send(
     pconfig, chat_id: str, message: str, *, thread_id: Optional[str] = None,
     media_files: Optional[list] = None, force_document: bool = False, caption: Optional[str] = None,
+    metadata: Optional[dict] = None,
 ) -> dict[str, Any]:
     """Send via Discord REST without a live gateway adapter (token: ``pconfig.token`` then env var). Forum
     channels (type 15) reject ``POST /messages``: a thread post is created via ``POST /channels/{id}/threads``
@@ -6876,8 +6882,11 @@ async def _standalone_send(
             url = _rest_url(f"channels/{chat_id}/messages")
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30), **_sess_kw) as session:
             if message.strip() or not media_files:
+                _body = {"content": message}
+                if metadata and metadata.get("brief_embed"):  # local patch: infra briefs as native embeds
+                    _body = brief_embed.rest_payload(message) or _body
                 last_data, err = await _post_paced(session, url, _standalone_response_json_or_error, "Discord API error",
-                                                   headers=json_headers, json={"content": message}, **_req_kw)
+                                                   headers=json_headers, json=_body, **_req_kw)
                 if err:  # paced: a 429 waits retry_after and retries, so a long split never floods (#152012)
                     return err
             # One multipart upload per file; a MEDIA:<path> caption rides as the attachment message's
