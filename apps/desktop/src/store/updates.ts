@@ -514,11 +514,18 @@ export function mapBackendCheck(res: BackendUpdateCheckResponse): DesktopUpdateS
   // that actually ran may claim there is nothing to update. Backends that
   // cannot self-update also answer `behind: null`, but `can_apply: false`
   // renders the unsupported copy first — those must not become failures.
-  const checkFailed = res.can_apply && res.behind === null
+  // A fork-only branch (localOnly) is a known, non-network condition: the
+  // backend is on a branch the official origin does not advertise. It is not
+  // a check failure — surface it as an informational state with the real
+  // message, not as "couldn't reach the update server".
+  const checkFailed = res.can_apply && res.behind === null && !res.localOnly
 
   return {
     supported: res.can_apply,
     error: checkFailed ? 'check-failed' : undefined,
+    localOnly: res.localOnly,
+    currentBranch: res.currentBranch,
+    dirty: res.dirty,
     message: res.message ?? undefined,
     updateAvailable: res.update_available,
     rollback: Boolean(res.rollback_to),

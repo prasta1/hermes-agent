@@ -873,6 +873,10 @@ export interface DesktopUpdateStatus {
   reason?: string
   message?: string
   error?: string
+  /** True when the backend is on a fork-only branch (not a network failure). */
+  localOnly?: boolean
+  /** True when the backend checkout has uncommitted changes. */
+  dirty?: boolean
   /** Exact commits behind. null = update available, but the count is
    *  unknowable (shallow clone without a merge-base) — never render it as a
    *  literal number. */

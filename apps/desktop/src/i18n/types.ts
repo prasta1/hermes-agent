@@ -3351,6 +3351,7 @@ export interface Translations extends NoticeTranslations {
     onLatest: string
     installing: string
     cantReach: string
+    localOnly: (branch: string) => string
     tapCheck: string
     updateReady: (count: number) => string
     updateReadyUnknown: string
