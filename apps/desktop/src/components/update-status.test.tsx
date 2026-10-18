@@ -175,6 +175,21 @@ describe('deriveUpdateStatus', () => {
     expect(view.error).toBe('check-failed')
   })
 
+  it('fork-only branch renders the honest local-only line, not a reachability error', () => {
+    const view = derive({
+      supported: true,
+      localOnly: true,
+      currentBranch: 'local',
+      branch: 'local',
+      behind: null,
+      message: "Branch 'local' is gone from the remote but has commits that are not in main"
+    })
+
+    expect(view.tone).toBe('idle')
+    expect(view.line).toBe(en.updates.localOnly('local'))
+    expect(view.error).toBeUndefined()
+  })
+
   it('applying beats available so the card cannot offer a second install', () => {
     const view = derive({ supported: true, behind: 3 }, { ...IDLE_APPLY, applying: true, stage: 'update' })
 

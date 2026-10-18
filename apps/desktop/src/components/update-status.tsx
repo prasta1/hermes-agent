@@ -137,6 +137,18 @@ function ordinaryUpdateStatus({
     }
   }
 
+  // A fork-only branch is a known, non-network condition — render it as an
+  // informational state with the real message, not as a reachability error.
+  if (status?.localOnly) {
+    return {
+      applying,
+      line: u.localOnly(status.currentBranch ?? status.branch ?? ''),
+      supported,
+      tone: 'idle',
+      updateAvailable
+    }
+  }
+
   if (applying) {
     return { applying, line: u.installing, supported, tone: 'available', updateAvailable }
   }
