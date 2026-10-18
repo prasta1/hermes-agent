@@ -111,6 +111,10 @@ export interface SessionStatusDotProps {
   /** Applied to the OUTER wrapper (stem + dot) — e.g. hover-fade on the
    *  reorder handle. */
   className?: string
+  /** Explicit color to paint (idle dot only). When provided, wins over the
+   *  store-derived color — used by the sidebar row to push a per-session color
+   *  through the memo boundary so a color-only change re-renders the row. */
+  color?: string | null
 }
 
 /**
@@ -122,14 +126,17 @@ export interface SessionStatusDotProps {
  * An idle session shows its project color; the active states own the dot with
  * their semantic color so an attention cue is never masked by the tint.
  */
-export function SessionStatusDot({ storedSessionId, session, branchStem, className }: SessionStatusDotProps) {
+export function SessionStatusDot({ storedSessionId, session, branchStem, className, color: explicitColor }: SessionStatusDotProps) {
   const { t } = useI18n()
   const r = t.sidebar.row
 
   // Subscribe to the shared color map for reactivity; sessionColorFor falls
   // back to the resolver for a session outside the recents page.
   useStore($sessionColorById)
-  const color = sessionColorFor(session) ?? null
+  // An explicit color (from the sidebar row's subscription) wins over the
+  // store-derived color — this lets the row push a color-only change through
+  // the memo boundary without the child having to re-subscribe.
+  const color = explicitColor ?? sessionColorFor(session) ?? null
 
   // Selector, not a plain useStore: the map is rebuilt whenever any session's
   // status changes, but a given dot only repaints when ITS OWN state flips.

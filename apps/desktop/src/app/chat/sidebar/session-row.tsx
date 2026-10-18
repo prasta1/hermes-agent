@@ -31,6 +31,7 @@ import { normalizeProfileKey } from '@/store/profile'
 import { $projects } from '@/store/projects'
 import { $pullRequestsByBranch, sessionPrKey } from '@/store/pull-requests'
 import { sessionPinId } from '@/store/session'
+import { $sessionColorById } from '@/store/session-color'
 import { $sessionDotStateById, hasLiveTurn, showsRunningArc } from '@/store/session-dot-state'
 import { $sessionListDensity } from '@/store/session-list-density'
 import { $openStoredSessionIds } from '@/store/session-states'
@@ -262,6 +263,12 @@ function SidebarSessionRowImpl({
   // whenever any session's status changes, but a row only repaints on its own.
   const dotState = useStoreSelector($sessionDotStateById, states => states[session.id] ?? 'idle')
   const liveTurn = hasLiveTurn(dotState)
+  // The row's color override (or inherited project color) — subscribed so a
+  // per-session color pick re-renders this row past the memo bailout. Without
+  // this the row's memo (rowPropsEqual) bails out on color-only changes since
+  // the session object ref is stable, and the child SessionStatusDot never gets
+  // a chance to re-read the store (it's blocked by the parent memo).
+  const sessionColor = useStoreSelector($sessionColorById, map => map[session.id] ?? null)
 
   // Card header line: the workspace this belongs to — the project when it
   // resolves (same function the session color reads, so name and tint agree;
@@ -504,6 +511,7 @@ function SidebarSessionRowImpl({
                   <SessionStatusDot
                     branchStem={branchStem}
                     className="transition-opacity group-hover/handle:opacity-0 group-focus-within/handle:opacity-0"
+                    color={sessionColor}
                     session={session}
                     storedSessionId={session.id}
                   />
@@ -511,7 +519,7 @@ function SidebarSessionRowImpl({
               </SidebarRowGrab>
             ) : (
               <SidebarRowLead className="overflow-hidden">
-                {lead ?? <SessionStatusDot branchStem={branchStem} session={session} storedSessionId={session.id} />}
+                {lead ?? <SessionStatusDot branchStem={branchStem} color={sessionColor} session={session} storedSessionId={session.id} />}
               </SidebarRowLead>
             )
 
@@ -691,6 +699,15 @@ function SidebarSessionRowImpl({
 // unchanged now bails out, even while a sibling session streams; its own status
 // arrives through a store subscription, which re-renders it past this bail.
 function rowPropsEqual(a: SidebarSessionRowProps, b: SidebarSessionRowProps): boolean {
+  // The structural props are identical — but the row also paints a per-session
+  // color (override or inherited project color) that lives in $sessionColorById,
+  // not on the session object. A color-only change (e.g. picking a new color from
+  // the Appearance menu) leaves the session ref stable, so without an explicit
+  // color comparison the memo bails out and the child SessionStatusDot never gets
+  // a chance to re-read the store (it's blocked by this parent memo).
+  const aColor = $sessionColorById.get()[a.session.id]
+  const bColor = $sessionColorById.get()[b.session.id]
+
   return (
     a.session === b.session &&
     a.isPinned === b.isPinned &&
@@ -703,7 +720,8 @@ function rowPropsEqual(a: SidebarSessionRowProps, b: SidebarSessionRowProps): bo
     a.card === b.card &&
     a.dragHandleProps === b.dragHandleProps &&
     a.className === b.className &&
-    a.style === b.style
+    a.style === b.style &&
+    aColor === bColor
   )
 }
 
