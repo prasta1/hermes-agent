@@ -2,9 +2,11 @@
 
 0.22.2's session PATCH/DELETE carry no ``request_id``/``expected_revision``. The owner never
 commits an unfenced write (the revision boundary holds on every transport), so it refuses with
-``client_upgrade_required``, worded so 0.22.2's own toast summariser (``readableError`` ->
-``rpcOutOfSync``, ``apps/desktop/src/store/notifications.ts`` at v0.22.2) shows "The app and the
-backend are on different versions. Update both." with its Update action instead of a raw code.
+``client_upgrade_required``. The wording must NOT contain "out of sync (different versions)":
+0.22.2's toast summariser (``readableError`` -> ``rpcOutOfSync``) maps that phrase to "The app and
+the backend are on different versions. Update both.", whose Update action routes the user to
+backend-only ``hermes update`` -- which cannot fix a pre-fence desktop app, so the warning never
+clears. The refusal names the desktop app and the real remedy instead.
 """
 import re
 
@@ -18,7 +20,8 @@ from hermes_state import SessionDB
 AUTH = {'Authorization': 'Bearer legacy-token'}
 # Verbatim from v0.22.2: notifications.ts ``readableError`` and gateway-rpc.ts ``isOutOfSyncRpcParams``.
 _DETAIL_RE = re.compile(r'"detail"\s*:\s*"([^"]+)"')
-_OUT_OF_SYNC_RE = re.compile(r'out of sync \(different versions\)', re.IGNORECASE)
+# The misleading phrase that 0.22.2's toast summariser maps to "different versions, update both".
+_MISLEADING_RE = re.compile(r'out of sync \(different versions\)', re.IGNORECASE)
 
 
 def _app(tmp_path, monkeypatch):
@@ -35,7 +38,14 @@ def _renders_as_upgrade(response):
     # Electron's httpStatusError builds ``f"{status}: {body}"``; the renderer reads it back.
     message = f'{response.status_code}: {response.text}'
     detail = _DETAIL_RE.search(message).group(1)
-    return detail.startswith('client_upgrade_required') and bool(_OUT_OF_SYNC_RE.search(detail))
+    # The refusal is still a named upgrade (machine-readable prefix), but it must NOT carry the
+    # phrase 0.22.2's toast summariser maps to "different versions, update both" -- that routes
+    # the user to backend-only `hermes update`, which cannot fix a pre-fence desktop app. It must
+    # name the desktop app and the real remedy instead.
+    return (detail.startswith('client_upgrade_required')
+            and not _MISLEADING_RE.search(detail)
+            and 'desktop app' in detail
+            and 'update the desktop app' in detail)
 
 
 @pytest.mark.asyncio

@@ -32,10 +32,15 @@ _DESCENDANTS_SQL = f"""
             """
 
 
-# Desktop 0.22.2's ``readableError`` keeps the HTTP ``detail`` and shows its "app and backend are
-# on different versions" toast (with an Update action) for "out of sync (different versions)".
-CLIENT_UPGRADE_REQUIRED = ('client_upgrade_required: this app is out of sync (different versions) '
-                           'with the Hermes backend; update the app to edit sessions')
+# This is a mutation-fence refusal, NOT a version mismatch: a session edit/delete/import arrived
+# without the fence identity (request_id/expected_revision/expected_generation), which a pre-fence
+# desktop app (<= 0.22.2) never sends. Wording must NOT contain "out of sync (different versions)":
+# the desktop toast summariser maps that phrase to "app and backend are on different versions, update
+# both", whose Update action routes the user to backend-only `hermes update` -- which cannot fix a
+# pre-fence desktop app, so the warning never clears. Name the desktop app and the real remedy.
+CLIENT_UPGRADE_REQUIRED = ('client_upgrade_required: this desktop app is too old to edit sessions '
+                           'against this backend; update the desktop app (hermes update only updates '
+                           'the backend)')
 
 
 def _session_latest_descendant(session_id: str, db):
