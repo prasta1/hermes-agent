@@ -341,8 +341,26 @@ async def check_hermes_update(force: bool = False, profile: Optional[str] = None
         behind = None
 
     payload["behind"] = behind
+    if isinstance(status, dict):
+        # Pass through the source check's own verdict fields so the desktop can
+        # distinguish a known, non-network condition (e.g. a fork-only branch
+        # the official origin does not advertise) from a genuine outage.
+        payload["localOnly"] = bool(status.get("localOnly"))
+        payload["branch"] = status.get("branch")
+        payload["currentBranch"] = status.get("currentBranch")
+        payload["dirty"] = bool(status.get("dirty"))
     if behind is None:
-        payload["message"] = "Couldn't reach the update source — try again later."
+        # The source check distinguishes a genuine network failure from a
+        # known, non-network condition (e.g. a fork-only branch that the
+        # official origin does not advertise). Pass the real reason through
+        # instead of collapsing every null into "couldn't reach the update
+        # source" — that copy made a custom-branch checkout read as a network
+        # outage in the desktop's update panel.
+        reason = status.get("error") if isinstance(status, dict) else None
+        if reason and reason not in ("fetch-failed", "head-unavailable"):
+            payload["message"] = status.get("message") or "Update check could not run."
+        else:
+            payload["message"] = "Couldn't reach the update source — try again later."
     elif behind == 0 and status.get("held"):
         version = status.get("sourceVersion")
         payload.update(held=status["held"], source_version=version,
