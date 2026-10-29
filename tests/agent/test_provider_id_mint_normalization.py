@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from types import SimpleNamespace
 
 import pytest
@@ -172,3 +174,17 @@ def test_unencodable_provider_ids_do_not_crash_and_stay_distinct():
 
     assert all(i.startswith("call_") for i in ids)
     assert len(set(ids)) == 2
+
+
+def test_rewrite_is_logged(caplog):
+    """A silent rekey is unexplainable in the field, so the rewrite emits one WARNING.
+
+    Nothing else in this module observes the log line; asserting it here keeps the
+    'ids changed and nobody said why' failure mode from coming back unnoticed.
+    """
+    raw = ["chatcmpl-tool-aaa", "chatcmpl-tool-bbb"]
+    with caplog.at_level(logging.WARNING, logger="agent.message_sanitization"):
+        _mint([_tool_call(i, n) for n, i in enumerate(raw)])
+
+    assert any("provider-minted parallel tool-call ids" in r.getMessage() for r in caplog.records), \
+        [r.getMessage() for r in caplog.records]
