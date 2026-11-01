@@ -337,6 +337,16 @@ def web_search_tool(query: str, limit: int = 5) -> str:
         else:
             logger.info("Web search via %s: '%s' (limit: %d)", provider.name, query, limit)
             response_data = _memoized_search(provider, query, limit)
+            debug_call_data["provider"] = provider.name
+            # A rescue or a managed fallback serves the call from another vendor while the response still
+            # reports success, so without this the debug log reads a degraded call as a healthy one.
+            served = response_data.get("data") or {}
+            rescued = (
+                response_data.get("rescued_from") or served.get("rescued_from")
+                or response_data.get("fallback_from") or served.get("fallback_from")
+            )
+            if rescued:
+                debug_call_data["rescued_from"] = rescued
 
         debug_call_data["results_count"] = len(response_data.get("data", {}).get("web", []))
         result_json = json.dumps(response_data, indent=2, ensure_ascii=False)
@@ -425,6 +435,10 @@ async def web_extract_tool(urls: list[Any], format: str | None = None, char_limi
             provider, error_json = _resolve_extract_provider(backend)
             if error_json is not None:
                 return error_json
+            # error_json is None here, so the provider resolved (a None provider only ever exits
+            # with an error_json, returned above); record it for the debug log.
+            if provider is not None:
+                debug_call_data["provider"] = provider.name
             results = await _extract_safe_urls(provider, safe_urls, format)
         # Reconstruct input order across invalid, blocked, and provider entries (providers preserve
         # the order of the safe URL list they receive).
@@ -433,6 +447,15 @@ async def web_extract_tool(urls: list[Any], format: str | None = None, char_limi
             results = _merge_in_order(len(urls), fixed, safe_indices, safe_urls, results)
 
         logger.info("Extracted content from %d pages", len(results))
+        # A whole-batch failure is retried on the keyless ring, which marks each rescued page in its
+        # metadata; lift that so a rescued batch is not logged as a clean extraction.
+        rescued = next(
+            (r["metadata"]["rescued_from"] for r in results
+             if isinstance(r.get("metadata"), dict) and r["metadata"].get("rescued_from")),
+            None,
+        )
+        if rescued:
+            debug_call_data["rescued_from"] = rescued
         debug_call_data["pages_extracted"] = len(results)
         debug_call_data["original_response_size"] = len(json.dumps({"results": results}))
         debug_call_data["processing_applied"].append("truncate_and_store")
