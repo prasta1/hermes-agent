@@ -1,10 +1,11 @@
-"""Realized digests bind link text without reading the linked directory."""
+"""Realized digests bind link text without reading the linked directory, and bind
+what pm published rather than what a process later left behind."""
 import os
 from pathlib import Path
 
 import pytest
 
-from pm.store import tree_digest
+from pm.store import digest_matches, tree_digest
 
 
 def test_digest_without_pathlib_junction_api(tmp_path, monkeypatch):
@@ -86,3 +87,42 @@ def test_junctions_bind_target_text_without_walking_outside(tmp_path, monkeypatc
         junction.rmdir()
     assert (left / "content").read_bytes() == b"changed outside the tree"
     assert (right / "content").read_bytes() == b"same bytes"
+
+
+def test_backend_identity_marker_is_not_payload(tmp_path):
+    """A backend writes its identity marker into site-packages after pm published it.
+
+    ``hermes_cli/web_server.py`` drops ``.hermes-ssh-runtime-<nonce>`` into the
+    managed interpreter's purelib on boot, and it has to stay inside the venv so a
+    replaced venv loses it. The digest is over what pm published, so that marker
+    must not read as a payload change.
+    """
+    root = tmp_path / "entry"
+    site = root / "lib" / "python3.14" / "site-packages"
+    site.mkdir(parents=True)
+    (site / "payload.py").write_bytes(b"published = True\n")
+    published = tree_digest(root)
+
+    (site / ".hermes-ssh-runtime-1a2b3c4d5e6f7a8b").write_text("pid=1234\n")
+    assert tree_digest(root) == published
+
+    # The exclusion is prefix-anchored, not a blanket dot-file or runtime-name skip.
+    (site / "hermes-ssh-runtime-1a2b3c4d5e6f7a8b").write_text("pid=1235\n")
+    assert tree_digest(root) != published
+
+    # And a genuine payload change is still caught alongside a live marker.
+    (site / "payload.py").write_bytes(b"published = False\n")
+    assert tree_digest(root) != published
+
+
+def test_digest_matches_survives_a_backend_identity_marker(tmp_path):
+    """The recorded digest stays valid once a backend has booted against the entry."""
+    root = tmp_path / "entry"
+    entry = root / "bin"
+    entry.mkdir(parents=True)
+    (entry / "interpreter").write_bytes(b"\x7fELF payload")
+    recorded = tree_digest(root)
+
+    (root / ".hermes-ssh-runtime-9f8e7d6c5b4a3928").write_text("pid=4321\n")
+    assert digest_matches(root, recorded)
+
