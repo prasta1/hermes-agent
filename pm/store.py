@@ -335,6 +335,25 @@ def digest_matches(root: Path, recorded: str | None) -> bool:
         tree_digest(root) == recorded or _tree_digest(root, skip_metadata=False) == recorded)
 
 
+# Runtime state written into a published entry AFTER pm hashed it. Excluded from the
+# digest for the same reason __pycache__ is: the digest is over what pm published, not
+# what a process left behind. Held in one place so a new runtime-state writer is a
+# single edit here rather than another scattered name check in the walk.
+_RUNTIME_STATE_DIRS = frozenset({"__pycache__"})
+_RUNTIME_STATE_FILE_PREFIXES = (".hermes-ssh-runtime-",)
+
+
+def _is_runtime_state_file(name: str) -> bool:
+    """Marker files a running process drops into a managed entry after publication.
+
+    ``.hermes-ssh-runtime-<nonce>`` is the SSH backend's identity marker, written into
+    the interpreter's site-packages on boot (``hermes_cli/web_server.py``). It has to
+    stay INSIDE the venv so that a replaced venv loses it deterministically, so it is
+    excluded from the digest here rather than relocated out of the artifact.
+    """
+    return name.startswith(_RUNTIME_STATE_FILE_PREFIXES)
+
+
 def _tree_digest(root: Path, *, skip_metadata: bool) -> str:
     """Deterministic sha256 over a directory tree: walk every file, sort
     by posix relpath, hash `relpath\\0<content>` per entry. No mtimes, no
@@ -342,10 +361,12 @@ def _tree_digest(root: Path, *, skip_metadata: bool) -> str:
     not the target's bytes — the link is the data. Directory symlinks and
     junctions are not followed.
 
-    ``__pycache__`` directories are skipped: CPython writes .pyc caches
-    into them the first time the staged interpreter runs (uv venv/uv sync
-    in a bundle build; first boot of a shipped app), so they are runtime
-    state, not package bytes — the digest is over what pm published."""
+    Runtime state is skipped: ``__pycache__`` directories, because CPython
+    writes .pyc caches into them the first time the staged interpreter runs
+    (uv venv/uv sync in a bundle build; first boot of a shipped app), and the
+    marker files in ``_RUNTIME_STATE_FILE_PREFIXES``, which a running backend
+    writes into its own site-packages. Both are runtime state, not package
+    bytes — the digest is over what pm published."""
     import hashlib
 
     files: list[tuple[str, Path]] = []
@@ -355,12 +376,14 @@ def _tree_digest(root: Path, *, skip_metadata: bool) -> str:
             path = Path(dirpath) / name
             if path.is_symlink() or is_junction(path):
                 files.append((path.relative_to(root).as_posix(), path))
-            elif name != "__pycache__":
+            elif name not in _RUNTIME_STATE_DIRS:
                 descend.append(name)
         dirnames[:] = descend
         for fname in filenames:
             path = Path(dirpath) / fname
             if skip_metadata and _is_os_metadata(path):
+                continue
+            if _is_runtime_state_file(fname):
                 continue
             files.append((path.relative_to(root).as_posix(), path))
     files.sort(key=lambda item: item[0])
