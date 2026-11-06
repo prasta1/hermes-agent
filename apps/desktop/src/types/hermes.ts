@@ -1708,8 +1708,6 @@ export interface BackendUpdateCheckResponse {
   /** True when the backend checkout is on a branch that only exists in a fork
    *  (the official origin does not advertise it). Not a network failure. */
   localOnly?: boolean
-  /** The branch the source check compared against. */
-  branch?: string
   /** The branch actually checked out on the backend. */
   currentBranch?: string
   /** True when the backend checkout has uncommitted changes. */
