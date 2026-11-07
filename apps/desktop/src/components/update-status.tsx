@@ -126,6 +126,22 @@ function ordinaryUpdateStatus({
     return { applying, line: status?.message ?? u.unsupportedMessage, supported, tone: 'unsupported', updateAvailable }
   }
 
+  // A fork-only branch is a known, non-network condition — render it as an
+  // informational state with the real message, not as a reachability error.
+  // Checked BEFORE `error`: source_check reports a fork-only branch as
+  // error="branch-local-only" together with localOnly, and the Desktop's source
+  // probe forwards that verdict verbatim, so the error branch would otherwise
+  // swallow the honest line and print "couldn't reach the update server".
+  if (status?.localOnly) {
+    return {
+      applying,
+      line: u.localOnly(status.currentBranch ?? status.branch ?? ''),
+      supported,
+      tone: 'idle',
+      updateAvailable
+    }
+  }
+
   if (status?.error) {
     return {
       applying,
@@ -133,18 +149,6 @@ function ordinaryUpdateStatus({
       line: u.cantReach,
       supported,
       tone: 'error',
-      updateAvailable
-    }
-  }
-
-  // A fork-only branch is a known, non-network condition — render it as an
-  // informational state with the real message, not as a reachability error.
-  if (status?.localOnly) {
-    return {
-      applying,
-      line: u.localOnly(status.currentBranch ?? status.branch ?? ''),
-      supported,
-      tone: 'idle',
       updateAvailable
     }
   }

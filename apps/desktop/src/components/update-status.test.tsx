@@ -191,6 +191,25 @@ describe('deriveUpdateStatus', () => {
     expect(view.error).toBeUndefined()
   })
 
+  it('fork-only branch stays informational when the probe also flags branch-local-only', () => {
+    // source_check sets error="branch-local-only" ALONGSIDE localOnly, and the
+    // Desktop's source probe forwards that JSON verbatim. The honest local-only
+    // line must win: the payload carries a real explanation, not an outage.
+    const view = derive({
+      supported: true,
+      error: 'branch-local-only',
+      localOnly: true,
+      currentBranch: 'local',
+      branch: 'local',
+      behind: null,
+      message: "Branch 'local' is gone from the remote but has commits that are not in main"
+    })
+
+    expect(view.tone).toBe('idle')
+    expect(view.line).toBe(en.updates.localOnly('local'))
+    expect(view.error).toBeUndefined()
+  })
+
   it('applying beats available so the card cannot offer a second install', () => {
     const view = derive({ supported: true, behind: 3 }, { ...IDLE_APPLY, applying: true, stage: 'update' })
 
