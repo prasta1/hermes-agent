@@ -340,3 +340,32 @@ describe('VersionHero bundle banners', () => {
     expect(screen.queryByText(en.updates.bundleSwapPending)).toBeNull()
   })
 })
+
+// A checkout pinned to a branch the official origin does not advertise answers
+// `behind: null` with `localOnly: true`. That is a known, non-network
+// condition, so it must never render as the reachability copy.
+describe('deriveUpdateStatus: a fork-only branch', () => {
+  it('renders the local-branch line in idle tone, not "we couldn\'t reach the update server"', () => {
+    const view = derive({
+      supported: true,
+      behind: null,
+      localOnly: true,
+      currentBranch: 'local',
+      branch: 'local',
+      error: 'branch-local-only',
+      message: "Branch 'local' is gone from the remote but has commits that are not in main."
+    })
+
+    expect(view.line).toBe(en.updates.localOnly('local'))
+    expect(view.tone).toBe('idle')
+    expect(view.error).toBeUndefined()
+    expect(view.updateAvailable).toBe(false)
+  })
+
+  it('a genuine check failure still reports one', () => {
+    const view = derive({ supported: true, behind: null, error: 'check-failed', message: 'offline' })
+
+    expect(view.line).toBe(en.updates.cantReach)
+    expect(view.tone).toBe('error')
+  })
+})

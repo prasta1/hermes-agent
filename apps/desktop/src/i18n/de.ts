@@ -4212,6 +4212,8 @@ export const deOverrides = {
     onLatest: 'Sie verwenden die neueste Version.',
     installing: 'Ein Update wird derzeit installiert.',
     cantReach: 'Der Update-Server konnte nicht erreicht werden.',
+    localOnly: branch =>
+      `Dieser Checkout liegt auf einem Branch, den das offizielle Repository nicht veröffentlicht (${branch}). Aktualisieren Sie ihn im Terminal mit „hermes update“.`,
     tapCheck: 'Tippen Sie auf „Jetzt prüfen“, um nach Updates zu suchen.',
     updateReady: count => `Ein neues Update ist bereit (${count} Änderung${count === 1 ? '' : 'en'} enthalten).`,
     updateReadyUnknown: 'Ein neues Update ist bereit.',

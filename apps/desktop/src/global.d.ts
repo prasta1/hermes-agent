@@ -1014,6 +1014,9 @@ export interface DesktopUpdateStatus {
   updateAvailable?: boolean
   branch?: string
   currentBranch?: string
+  /** The checkout is on a branch the official origin does not advertise: a known,
+   *  non-network condition, never a failed check. */
+  localOnly?: boolean
   reason?: string
   message?: string
   error?: string

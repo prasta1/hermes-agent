@@ -3837,6 +3837,8 @@ export const en: Translations = {
     onLatest: "You're on the latest version.",
     installing: 'An update is currently installing.',
     cantReach: "We couldn't reach the update server.",
+    localOnly: branch =>
+      `This checkout is on a branch the official repository does not publish (${branch}). Update it from a terminal with "hermes update".`,
     tapCheck: 'Tap "Check now" to look for updates.',
     updateReady: count => `A new update is ready (${count} change${count === 1 ? '' : 's'} included).`,
     updateReadyUnknown: 'A new update is ready.',

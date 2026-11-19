@@ -1652,6 +1652,12 @@ export interface BackendUpdateCheckResponse {
   can_apply: boolean
   update_command: string | null
   message: string | null
+  /** The checkout is on a branch the official origin does not advertise: a known,
+   *  non-network condition, never a failed check. */
+  localOnly?: boolean
+  /** The branch the check selected, which the local-only case keeps instead of main. */
+  currentBranch?: null | string
+  dirty?: boolean
   commits?: BackendUpdateCommit[]
 }
 

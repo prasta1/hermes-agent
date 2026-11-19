@@ -126,6 +126,20 @@ function ordinaryUpdateStatus({
     return { applying, line: status?.message ?? u.unsupportedMessage, supported, tone: 'unsupported', updateAvailable }
   }
 
+  // A branch the official origin does not advertise is a known, non-network
+  // condition, and source_check reports it as error="branch-local-only"
+  // alongside localOnly. This is checked BEFORE `error`, or the error branch
+  // swallows the honest line and prints the reachability copy.
+  if (status?.localOnly) {
+    return {
+      applying,
+      line: u.localOnly(status.currentBranch ?? status.branch ?? ''),
+      supported,
+      tone: 'idle',
+      updateAvailable
+    }
+  }
+
   if (status?.error) {
     return {
       applying,

@@ -2283,6 +2283,7 @@
   "updates.checkUnknownBodyAppInstaller": ["ar","ja","ru","zh-hant"],
   "updates.checkUnknownTitleAppInstaller": ["ar","ja","ru","zh-hant"],
   "updates.connectionSettings": ["ar","ja","ru","zh","zh-hant"],
+  "updates.localOnly": ["ar","ja","ru","zh","zh-hant"],
   "updates.openDownloadPage": ["ar","ja","ru","zh","zh-hant"],
   "updates.releaseAvailable": ["ar","ja","ru","zh-hant"],
   "updates.versionDetailsBody": ["ja","ru","zh-hant"],

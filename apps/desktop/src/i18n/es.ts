@@ -4201,6 +4201,8 @@ export const esOverrides = {
     onLatest: 'Ya tienes la versión más reciente.',
     installing: 'Se está instalando una actualización.',
     cantReach: 'No pudimos contactar con el servidor de actualizaciones.',
+    localOnly: branch =>
+      `Este checkout está en una rama que el repositorio oficial no publica (${branch}). Actualízalo desde una terminal con "hermes update".`,
     tapCheck: 'Pulsa "Comprobar ahora" para buscar actualizaciones.',
     updateReady: count =>
       `Hay una actualización lista (${count} ${count === 1 ? 'cambio incluido' : 'cambios incluidos'}).`,
